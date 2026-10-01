@@ -222,7 +222,6 @@ function warn(txt){ if(storeOK){storeOK=false; const el=document.getElementById(
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
 function save(){
-  if(typeof ghSchedule==='function') ghSchedule();
   const data=JSON.stringify(S);
   if(!lsSet(KEY,data)) warn('这个浏览器不允许本地保存（iPhone 用「文件」直接打开时常见）。你仍然可以勾选，但关掉页面会丢，请用底部「备份 / 恢复」把备份码或备份文件存到备忘录。');
 }
@@ -511,7 +510,6 @@ document.getElementById('btnNote').addEventListener('click',()=>{
   '<li><b>＋ 手动录入</b>：自己补一振刀（编号 / 刀名 / 刀种，可选极编号），按编号插到对应位置，只存在你这台设备。</li>'+
   '<li><b>国服上线情况</b>取自游族官网 2016–2026 年全部 715 条公告与新闻。官网在 2023-09～2025-07 有缺失、2026-03 之后未更新，所以带红色「官网未见公告」标记的 11 振（九鬼正宗、安宅切、二筋樋贞宗、云重、童子切安纲 剥落、云次、三郎国宗、波平行安、狐崎为次、柏太刀、桃太郎祐定）有可能其实已上线——点一下标记即可改为已上线。</li>'+
   '<li><b>「获取最新刀账」怎么用：</b>点底部按钮，页面会联网从日文维基百科读取最新刀剑名录，自动把新出的刀追加进列表，你已勾选的记录不受影响。国内访问日文维基通常需要开代理；失败时页面会说明原因，可以稍后再点。</li>'+
-  '<li><b>云同步（可选）</b>：在「备份 / 恢复」里粘一次你自己的 GitHub 令牌（只需 gist 权限），多台设备就会共用同一份记录——改动后自动上传、打开页面自动拉取。令牌只存本机，不写进网页。</li>'+
   '<li>刀帐序号、立绘与头像来自萌娘百科《刀剑乱舞》条目。</li>'+
   '</ul><div class="btns"><button class="primary" data-act="close">知道了</button></div>');
 });
@@ -564,80 +562,6 @@ function openIconPicker(){
       '<img src="'+IMG[String(r[2])]+'" alt=""><span>'+r[0]+'</span></button>').join('')+'</div>'+
   '<p id="iconHint" style="font-size:12.5px;color:#5c554d">当前图标：'+(cur?cur[0]:ICON)+'</p>'+
   '<p style="font-size:12px;color:#8b8178">点空白处关闭本窗口</p>');
-}
-
-/* ---------- 云同步：用你自己的 GitHub Gist 存记录 ---------- */
-const KGH_T='tr_gh_token', KGH_G='tr_gh_gist', KGH_LT='tr_gh_local', KGH_AUTO='tr_gh_auto';
-let GHT=lsGet(KGH_T)||'', GHG=lsGet(KGH_G)||'', GHAUTO=lsGet(KGH_AUTO)!=='0';
-function ghHdr(){ return {'Authorization':'Bearer '+GHT,'Accept':'application/vnd.github+json','Content-Type':'application/json'}; }
-function ghState(){ return JSON.stringify({v:2,t:Date.now(),s:S,e:EXTRA}); }
-function ghApply(txt){
-  const o=JSON.parse(txt); if(!o||typeof o!=='object') throw new Error('云端数据格式不对');
-  S=o.s||{}; EXTRA=o.e||[];
-  lsSet(KEXTRA,JSON.stringify(EXTRA)); lsSet(KGH_LT,String(o.t||Date.now())); save();
-  rebuild(); renderFilters(); render();
-}
-async function ghPush(quiet){
-  if(!GHT) throw new Error('还没填令牌');
-  const body={description:'刀账立绘收集表 · 记录',public:false,files:{'touken.json':{content:ghState()}}};
-  const url=GHG? 'https://api.github.com/gists/'+GHG : 'https://api.github.com/gists';
-  const r=await fetch(url,{method:GHG?'PATCH':'POST',headers:ghHdr(),body:JSON.stringify(body)});
-  if(!r.ok) throw new Error('GitHub 返回 '+r.status+(r.status===401?'（令牌不对）':r.status===404?'（找不到该 Gist）':''));
-  const j=await r.json(); GHG=j.id; lsSet(KGH_G,GHG); lsSet(KGH_LT,String(Date.now()));
-  if(!quiet) ghStatus('已上传 ✓ '+new Date().toLocaleTimeString());
-  return true;
-}
-async function ghPull(){
-  if(!GHT||!GHG) throw new Error('还没连接云端');
-  const r=await fetch('https://api.github.com/gists/'+GHG,{headers:ghHdr(),cache:'no-store'});
-  if(!r.ok) throw new Error('GitHub 返回 '+r.status);
-  const j=await r.json(), f=j.files&&j.files['touken.json'];
-  if(!f) throw new Error('这个 Gist 里没有记录文件');
-  const txt=f.content|| (f.raw_url? await (await fetch(f.raw_url)).text() : '');
-  const remote=JSON.parse(txt);
-  const local=parseInt(lsGet(KGH_LT)||'0',10);
-  if((remote.t||0)<=local) return 'same';
-  ghApply(txt); return 'applied';
-}
-let ghTimer=null;
-function ghSchedule(){
-  if(!GHT||!GHAUTO) return;
-  clearTimeout(ghTimer);
-  ghTimer=setTimeout(()=>{ ghPush(true).catch(e=>ghStatus('自动上传失败：'+e.message)); },2500);
-}
-function ghStatus(t){ const el=document.getElementById('ghStatus'); if(el) el.textContent=t; }
-function ghSection(){
-  const conn=!!(GHT&&GHG);
-  return '<h2 style="margin-top:16px">云同步（多设备共用一份记录）</h2>'+
-  '<p style="font-size:12.5px;color:#5c554d">用你自己的 GitHub 私有 Gist 当云端。令牌只保存在本机，不会写进网页，别人拿不到。</p>'+
-  (GHT? '' : '<label>GitHub 令牌（只需 gist 权限）</label><input id="ghTok" type="text" placeholder="ghp_… 或 github_pat_…">')+
-  '<div class="btns">'+
-    (conn? '' : '<button class="primary" data-act="ghconn">'+(GHT?'创建 / 连接云端':'保存令牌并连接')+'</button>')+
-    (conn? '<button class="primary" data-act="ghup">立即上传</button><button data-act="ghdown">立即下载</button>' : '')+
-    (conn? '<button data-act="ghauto">自动同步：'+(GHAUTO?'开':'关')+'</button>' : '')+
-    (GHT? '<button data-act="ghdisc">断开</button>' : '')+
-  '</div>'+
-  '<p id="ghStatus" style="font-size:12px;color:#8b8178">'+(conn? '已连接 · 云端会自动同步'+(GHAUTO?'（开）':'（关）') : '未连接')+'</p>';
-}
-async function ghFind(){
-  const r=await fetch('https://api.github.com/gists?per_page=100',{headers:ghHdr(),cache:'no-store'});
-  if(!r.ok) throw new Error('GitHub 返回 '+r.status+(r.status===401?'（令牌不对或没有 gist 权限）':''));
-  const list=await r.json();
-  const hit=(list||[]).find(g=>g.description==='刀账立绘收集表 · 记录'&&g.files&&g.files['touken.json']);
-  return hit? hit.id : '';
-}
-async function ghConnectFromPanel(){
-  const el=document.getElementById('ghTok');
-  const tok=el? el.value.trim() : '';
-  if(tok){ GHT=tok; lsSet(KGH_T,tok); }
-  if(!GHT) return alert('请先填入 GitHub 令牌。');
-  ghStatus('连接中…');
-  try{
-    if(!GHG){ const found=await ghFind(); if(found){ GHG=found; lsSet(KGH_G,found); } }
-    if(GHG){ const r=await ghPull(); if(r!=='applied') await ghPush(true); }
-    else { await ghPush(true); }
-    openBackup(); ghStatus('已连接 ✓ 记录已同步到你的私有 Gist');
-  }catch(e){ ghStatus('失败：'+e.message); }
 }
 
 /* ---------- .xlsx 读写（自带实现，不依赖外部库/网络） ---------- */
@@ -808,7 +732,6 @@ function openBackup(){
     '<button class="primary" data-act="copy">复制备份码</button>'+
     '<button class="dangerbtn" data-act="import">导入并覆盖</button>'+
   '</div>'+
-  ghSection()+
   '<p style="font-size:12px;color:#8b8178;margin:0 0 12px">点空白处即可关闭本窗口</p>'+
   '<div class="danger"><button data-act="reset">清空全部记录</button></div>');
   document.getElementById('code').value=encodeState();
@@ -868,11 +791,6 @@ panel.addEventListener('click',async e=>{
     save(); lsSet(KEXTRA,JSON.stringify(EXTRA));
     rebuild(); closePanel(); renderFilters(); render(); return;
   }
-  if(act==='ghconn'){ ghConnectFromPanel(); return; }
-  if(act==='ghup'){ ghStatus('上传中…'); try{ await ghPush(false); }catch(e){ ghStatus('失败：'+e.message); } return; }
-  if(act==='ghdown'){ ghStatus('下载中…'); try{ const r=await ghPull(); ghStatus(r==='applied'?'已用云端记录覆盖本机 ✓':'云端没有更新的记录'); if(r==='applied'){ closePanel(); renderFilters(); render(); } }catch(e){ ghStatus('失败：'+e.message); } return; }
-  if(act==='ghauto'){ GHAUTO=!GHAUTO; lsSet(KGH_AUTO,GHAUTO?'1':'0'); openBackup(); return; }
-  if(act==='ghdisc'){ if(confirm('断开云同步？（不会删除任何记录，只是不再自动同步）')){ GHT='';GHG=''; lsSet(KGH_T,''); lsSet(KGH_G,''); openBackup(); } return; }
   if(act==='xlsxout'){
     b.textContent='正在导出…';
     try{ await exportXlsx(); b.textContent='导出 .xlsx 文件'; }
@@ -971,7 +889,6 @@ load(); rebuild(); renderFilters(); render();
 document.getElementById('iconBtn').addEventListener('click',openIconPicker);
 applyIcon();
 probeIcons();
-if(GHT&&GHG&&GHAUTO) ghPull().catch(()=>{});
 </script>
 </body>
 </html>
